@@ -173,7 +173,7 @@ func GenerateCustomToken(uid string, developerClaims *jws.Claims, clientEmail st
 	claims.SetAudience(firebaseAudience)
 	now := time.Now()
 	claims.SetIssuedAt(now)
-	claims.SetExpiration(now.AddDate(1, 0, 0)) // valid for 1 year :)
+	claims.SetExpiration(now.Add(time.Hour))
 
 	if developerClaims != nil {
 
