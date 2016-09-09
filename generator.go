@@ -6,6 +6,9 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"github.com/SermoDigital/jose/crypto"
+	"github.com/SermoDigital/jose/jws"
 	"strings"
 	"time"
 )
@@ -17,6 +20,8 @@ const (
 	TokenSep = "."
 	// MaxUIDLen is the maximum length for an UID
 	MaxUIDLen = 256
+
+	firebaseAudience = "https://identitytoolkit.googleapis.com/google.identity.identitytoolkit.v1.IdentityToolkit"
 )
 
 // Firebase specific values for header
@@ -143,4 +148,89 @@ func sign(message, secret string) string {
 	h := hmac.New(sha256.New, []byte(secret))
 	h.Write([]byte(message))
 	return encode(h.Sum(nil))
+}
+
+func GenerateCustomToken(uid string, developerClaims *jws.Claims, clientEmail string, privateKeyString string) (string, error) {
+
+	privateKey, err := crypto.ParseRSAPrivateKeyFromPEM([]byte(privateKeyString))
+	if err != nil {
+		return "", err
+	}
+
+	if uid == "" {
+		return "", errors.New("Uid must be provided.")
+	}
+
+	if clientEmail == "" {
+		return "", errors.New("Must provide an issuer.")
+	}
+
+	method := crypto.SigningMethodRS256
+	claims := jws.Claims{}
+	claims.Set("uid", uid)
+	claims.SetIssuer(clientEmail)
+	claims.SetSubject(clientEmail)
+	claims.SetAudience(firebaseAudience)
+	now := time.Now()
+	claims.SetIssuedAt(now)
+	claims.SetExpiration(now.Add(time.Hour))
+
+	if developerClaims != nil {
+
+		for claim := range *developerClaims {
+			if isReserved(claim) {
+				return "", fmt.Errorf("developer_claims cannot contain a reserved key: %s", claim)
+			}
+		}
+		claims.Set("claims", developerClaims)
+	}
+
+	jwt := jws.NewJWT(claims, method)
+	bytes, err := jwt.Serialize(privateKey)
+	if err != nil {
+		return "", err
+	}
+
+	return string(bytes), nil
+}
+
+// isReserved determines whether a given name is a reserved name via binary search.
+
+var (
+	reservedNames = []string{
+		"acr",
+		"amr",
+		"at_hash",
+		"aud",
+		"auth_time",
+		"azp",
+		"cnf",
+		"c_hash",
+		"exp",
+		"firebase",
+		"iat",
+		"iss",
+		"jti",
+		"nbf",
+		"nonce",
+		"sub",
+	}
+)
+
+func isReserved(name string) bool {
+	if len(reservedNames) > 0 {
+		l, r := 0, len(reservedNames)-1
+		for l <= r {
+			m := l + (r-l)/2
+			curr := reservedNames[m]
+			if curr == name {
+				return true
+			} else if curr > name {
+				r = m - 1
+			} else /* if curr < name */ {
+				l = m + 1
+			}
+		}
+	}
+	return false
 }
